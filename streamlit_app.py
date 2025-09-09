@@ -9,14 +9,10 @@ st.set_page_config(page_title="Gemini 2.5 Flash Chatbot", page_icon="💬")
 st.title("💬 Chatbot (Gemini 2.5 Flash)")
 st.caption("Google Gemini 2.5 Flash を使ったシンプルなチャットボット")
 
-# Secrets 推奨（Streamlit Cloud の Manage app > Secrets）
-default_key = st.secrets.get("GEMINI_API_KEY", "")
-gemini_api_key = st.text_input("Gemini API Key", value=default_key, type="password")
+# ✅ Secrets から APIキーを取得（.streamlit/secrets.toml または Cloud の Secrets 設定から）
+gemini_api_key = st.secrets["GEMINI_API_KEY"]
 
-if not gemini_api_key:
-    st.info("GEMINI_API_KEY を入力（または Secrets に設定）してください。", icon="🗝️")
-    st.stop()
-
+# クライアント生成
 client = genai.Client(api_key=gemini_api_key)
 
 # 会話履歴を保持
@@ -35,19 +31,17 @@ if prompt := st.chat_input("メッセージを入力..."):
     with st.chat_message("user"):
         st.markdown(prompt)
 
-    # ---- ここが修正ポイント：素の dict で contents を作成 ----
-    # 過去ログを（長すぎないよう）直近20件に制限
+    # 過去ログを直近20件に制限
     history = st.session_state.messages[-20:]
 
     contents = []
     for m in history:
         contents.append({
             "role": "user" if m["role"] == "user" else "model",
-            "parts": [{"text": str(m["content"])}],  # ヘルパー無しで安全に
+            "parts": [{"text": str(m["content"])}],
         })
-    # ----------------------------------------------------------
 
-    # 生成（ストリーミング）
+    # Gemini に問い合わせ（ストリーミング）
     with st.chat_message("assistant"):
         try:
             stream = client.models.generate_content_stream(
@@ -57,7 +51,6 @@ if prompt := st.chat_input("メッセージを入力..."):
 
             def token_stream():
                 for event in stream:
-                    # event.candidates[0].content.parts[*].text を順次出力
                     if getattr(event, "candidates", None):
                         cand = event.candidates[0]
                         if getattr(cand, "content", None) and getattr(cand.content, "parts", None):
@@ -67,13 +60,12 @@ if prompt := st.chat_input("メッセージを入力..."):
 
             response_text = st.write_stream(token_stream())
 
-        except Exception as e:
-            # ストリーミングが使えない環境向けフォールバック
+        except Exception:
+            # フォールバック: 非ストリーミング呼び出し
             resp = client.models.generate_content(
                 model="gemini-2.5-flash",
                 contents=contents,
             )
-            # レスポンステキスト抽出（候補0の全パーツを連結）
             response_text = ""
             if getattr(resp, "candidates", None):
                 cand = resp.candidates[0]
